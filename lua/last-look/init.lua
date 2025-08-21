@@ -26,22 +26,22 @@ local function show_diff_with_disk()
   vim.cmd('diffthis')
 end
 
--- SmartQuit: if modified, show diff and DO NOT quit; else, do a normal :q
-vim.api.nvim_create_user_command('SmartQuit', function()
+-- LastLook: if modified, show diff and DO NOT quit; else, do a normal :q
+vim.api.nvim_create_user_command('LastLook', function()
   local b = vim.api.nvim_get_current_buf()
   local name = vim.api.nvim_buf_get_name(b)
   if vim.bo[b].modified and name ~= '' and vim.fn.filereadable(name) == 1 then
     show_diff_with_disk()
-    vim.notify('Unsaved changes — opened diff. Save (:w) or force quit (:q!).', vim.log.levels.WARN)
+    vim.notify('Unsaved changes — opening diff. Save (:w) or force quit (:q!).', vim.log.levels.WARN)
     return  -- stay in nvim with the diff visible
   end
   vim.cmd('q')
 end, {})
 
--- Command-line abbreviations: redirect plain :q / :quit to SmartQuit (but NOT :q!)
+-- Command-line abbreviations: redirect plain :q / :quit to LastLook (but NOT :q!)
 vim.cmd([[
-  cnoreabbrev <expr> q     (getcmdtype()==':' && getcmdline()==#'q')     ? 'SmartQuit' : 'q'
-  cnoreabbrev <expr> quit  (getcmdtype()==':' && getcmdline()==#'quit')  ? 'SmartQuit' : 'quit'
+  cnoreabbrev <expr> q     (getcmdtype()==':' && getcmdline()==#'q')     ? 'LastLook' : 'q'
+  cnoreabbrev <expr> quit  (getcmdtype()==':' && getcmdline()==#'quit')  ? 'LastLook' : 'quit'
 ]])
 
 -- Optional: keep a manual command too
