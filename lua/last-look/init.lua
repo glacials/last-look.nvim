@@ -1,29 +1,84 @@
 local M = {}
 
--- Helper: open a vertical diff vs the on-disk file, keep syntax
+
 local function show_diff_with_disk()
   local cur_win = vim.api.nvim_get_current_win()
   local cur_buf = vim.api.nvim_get_current_buf()
   local ft      = vim.bo[cur_buf].filetype
-  local name    = vim.api.nvim_buf_get_name(cur_buf)
+  local fname   = vim.api.nvim_buf_get_name(cur_buf)
 
-  if name == '' or vim.bo[cur_buf].buftype ~= '' or vim.fn.filereadable(name) ~= 1 then
+  if fname == '' or vim.bo[cur_buf].buftype ~= '' or vim.fn.filereadable(fname) ~= 1 then
     vim.notify('Nothing diffable here.', vim.log.levels.WARN)
     return
   end
 
-  -- create scratch with file-on-disk
-  vim.cmd('vert new')
-  vim.cmd('setlocal buftype=nofile bufhidden=wipe nobuflisted noswapfile')
-  vim.api.nvim_buf_set_name(0, 'on-disk://' .. name)
-  vim.cmd('keepjumps read ' .. vim.fn.fnameescape(name))
-  vim.cmd('0d_')                 -- remove the extra blank line from :read
-  vim.bo.filetype = ft           -- preserve syntax highlighting
+  local scratch_name = 'last-look://' .. fname
+  local scratch_buf  = vim.fn.bufnr(scratch_name)
 
-  -- enter diff mode on both sides
+  -- create or reuse the scratch buffer
+  if scratch_buf == -1 then
+    scratch_buf = vim.api.nvim_create_buf(false, true) -- listed=false, scratch=true
+    vim.api.nvim_buf_set_name(scratch_buf, scratch_name)
+    vim.bo[scratch_buf].buftype   = 'nofile'
+    vim.bo[scratch_buf].bufhidden = 'wipe'
+    vim.bo[scratch_buf].swapfile  = false
+    vim.bo[scratch_buf].filetype  = ft
+  else
+    -- refresh contents if it exists
+    vim.bo[scratch_buf].modifiable = true
+    vim.api.nvim_buf_set_lines(scratch_buf, 0, -1, false, {})
+  end
+
+  -- read file-on-disk into scratch (no :read, avoid extra blank line)
+  local lines = vim.fn.readfile(fname)
+  vim.api.nvim_buf_set_lines(scratch_buf, 0, -1, false, lines)
+  vim.bo[scratch_buf].modifiable = false
+
+  -- open / focus a vertical split showing the scratch
+  local target_win
+  for _, w in ipairs(vim.api.nvim_list_wins()) do
+    if vim.api.nvim_win_get_buf(w) == scratch_buf then target_win = w break end
+  end
+  if not target_win then
+    vim.cmd('vert new')
+    target_win = vim.api.nvim_get_current_win()
+    vim.api.nvim_win_set_buf(target_win, scratch_buf)
+  end
+
+  -- diff both sides
+  vim.api.nvim_set_current_win(target_win)
   vim.cmd('diffthis')
   vim.api.nvim_set_current_win(cur_win)
   vim.cmd('diffthis')
+end
+
+-- SmartQuit: skip in non-file buffers; if modified, prompt; otherwise plain :q
+local function smart_quit_current()
+  local b = vim.api.nvim_get_current_buf()
+  local name = vim.api.nvim_buf_get_name(b)
+
+  -- if we're in the scratch or any non-file buffer, do a plain :q
+  if vim.bo[b].buftype ~= '' or name:find('^last%-look://') then
+    vim.cmd('q')
+    return
+  end
+
+  if not vim.bo[b].modified or name == '' or vim.fn.filereadable(name) ~= 1 then
+    vim.cmd('q')
+    return
+  end
+
+  local choices = table.concat({ cfg.labels.save, cfg.labels.discard, cfg.labels.diff, cfg.labels.cancel }, '\n')
+  local choice = cfg.use_confirm and vim.fn.confirm('Buffer has unsaved changes:', choices, 1) or 4
+
+  if choice == 1 then
+    vim.cmd('w | q')
+  elseif choice == 2 then
+    vim.cmd('q!')
+  elseif choice == 3 then
+    show_diff_with_disk()
+    vim.notify('Showing diff. Save (:w) or force quit (:q!).', vim.log.levels.WARN)
+  end
 end
 
 -- LastLook: if modified, show diff and DO NOT quit; else, do a normal :q
@@ -38,11 +93,18 @@ vim.api.nvim_create_user_command('LastLook', function()
   vim.cmd('q')
 end, {})
 
--- Command-line abbreviations: redirect plain :q / :quit to LastLook (but NOT :q!)
-vim.cmd([[
-  cnoreabbrev <expr> q     (getcmdtype()==':' && getcmdline()==#'q')     ? 'LastLook' : 'q'
-  cnoreabbrev <expr> quit  (getcmdtype()==':' && getcmdline()==#'quit')  ? 'LastLook' : 'quit'
-]])
+vim.keymap.set('c', '<CR>', function()
+  local t = vim.fn.getcmdtype()
+  local l = vim.fn.getcmdline()
+  if t == ':' and l:match('^%s*q%s*$') then
+    return '\x15LastLook\r'    -- \x15 = <C-u> (clear cmdline), \r = <CR>
+  elseif t == ':' and l:match('^%s*quit%s*$') then
+    return '\x15LastLook\r'
+  else
+    return '\r'
+  end
+end, { expr = true, noremap = true, desc = 'last-look: smart :q remap' })
+
 
 -- Optional: keep a manual command too
 vim.api.nvim_create_user_command('DiffOrig', show_diff_with_disk, {})
