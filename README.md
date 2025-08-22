@@ -1,18 +1,11 @@
 # last-look.nvim
 
-> Don’t quit without a last look.
+A Neovim plugin that shows a visual diff
+any time `:q` is called with unsaved changes.
 
-last-look.nvim improves the quit-with-unsaved-changes experience of Neovim.
-Now when you quit, you will be shown the diff between the file on disk and the file in your buffer.
+![A screenshot of a side-by-side diff in Neovim between a buffer and its respective file on disk.](.github/screenshot.png)
 
-No keybinds, no configuration.
-
-A Neovim plugin that intercepts `:q`
-to protect you from rage-quitting unsaved buffers.
-
-When you try to quit with any unsaved buffers,
-you are shown the diff between the buffer and the file on disk.
-From there, you can decide to save, discard, or cancel.
+The diff is between your buffer and the file on disk.
 
 ## Install
 
@@ -24,9 +17,10 @@ From there, you can decide to save, discard, or cancel.
 
 ### packer.nvim
 
+```lua
 use { "glacials/last-look.nvim" }
+```
 
 ## Commands
 
--   `:LastLook` — run the guard manually
--   `:lua require('last-look').diff_orig()` — open the diff manually
+-   `:LastLook` — manually run the guard and then quit
