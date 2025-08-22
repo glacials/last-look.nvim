@@ -26,6 +26,37 @@ You can also directly edit the diff buffer and save from there.
 use { "glacials/last-look.nvim" }
 ```
 
+### vim-plug
+
+```vim
+Plug 'glacials/last-look.nvim'
+```
+
+### dein.vim
+
+```vim
+call dein#add('glacials/last-look.nvim')
+```
+
+### paq-nvim
+
+```lua
+require "paq" {
+"glacials/last-look.nvim";
+}
+```
+
+### minpac
+
+```vim
+call minpac#add('glacials/last-look.nvim')
+```
+
 ## Commands
 
 -   `:LastLook` — manually run the guard and then quit
+
+## License
+
+last-look.nvim is licensed under MIT.
+Please see [LICENSE](LICENSE) for details.
