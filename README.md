@@ -56,6 +56,20 @@ call minpac#add('glacials/last-look.nvim')
 
 -   `:LastLook` — manually run the guard and then quit
 
+### Inherited Commands
+
+`last-look.nvim` does not add any actions worthy of keybinds,
+but inherits the same mappings of `vimdiff`.
+
+For your convenience:
+
+-   `]c`: Jump to the next change
+-   `[c`: Jump to the previous change
+-   `zo` / `zc`: Open / close a fold
+-   `zr` / `zm`: Open / close all folds
+-   `do`: Bring a change into this window from the other window
+-   `dc`: Take a change from this window to the other window
+
 ## License
 
 last-look.nvim is licensed under MIT.
