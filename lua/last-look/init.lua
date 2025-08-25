@@ -93,13 +93,35 @@ vim.api.nvim_create_user_command('LastLook', function()
   vim.cmd('q')
 end, {})
 
+-- LastLookAll: same as above, but for :qa
+vim.api.nvim_create_user_command('LastLookAll', function()
+  for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_loaded(bufnr)
+       and vim.bo[bufnr].buftype == ''
+       and vim.bo[bufnr].modified
+       and vim.fn.filereadable(vim.api.nvim_buf_get_name(bufnr)) == 1 then
+      -- run your same guard / diff logic here
+      vim.api.nvim_set_current_buf(bufnr)
+      vim.cmd('LastLook') -- reuse your single-buffer command
+      return -- bail after first modified buffer so user can act
+    end
+  end
+  -- if no modified buffers left, safe to quit all
+  vim.cmd('qa')
+end, { desc = 'Run last-look guard across all buffers' })
+
+
 vim.keymap.set('c', '<CR>', function()
   local t = vim.fn.getcmdtype()
   local l = vim.fn.getcmdline()
   if t == ':' and l:match('^%s*q%s*$') then
-    return '\x15LastLook\r'    -- \x15 = <C-u> (clear cmdline), \r = <CR>
+    return '\x15LastLook\r'
   elseif t == ':' and l:match('^%s*quit%s*$') then
     return '\x15LastLook\r'
+  elseif t == ':' and l:match('^%s*qa%s*$') then
+    return '\x15LastLookAll\r'
+  elseif t == ':' and l:match('^%s*qall%s*$') then
+    return '\x15LastLookAll\r'
   else
     return '\r'
   end
