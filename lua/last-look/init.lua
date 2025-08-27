@@ -1,134 +1,203 @@
 local M = {}
 
+-- defaults
+local cfg = {
+	diff_command = "vert new", -- how to open the scratch view
+	use_confirm = true, -- use vim.fn.confirm vs raw input
+	labels_saved = { "&Save", "&Discard", "&Diff", "&Cancel" },
+	labels_new = { "&Save As", "&Discard", "&Cancel" },
+}
 
+-- utils
+local function is_normal(buf)
+	return vim.api.nvim_buf_is_loaded(buf) and vim.bo[buf].buftype == ""
+end
+
+local function buf_path(buf)
+	return vim.api.nvim_buf_get_name(buf)
+end
+
+local function is_readable(path)
+	return path ~= "" and vim.fn.filereadable(path) == 1
+end
+
+-- diff current buffer against on-disk contents (saved files only)
 local function show_diff_with_disk()
-  local cur_win = vim.api.nvim_get_current_win()
-  local cur_buf = vim.api.nvim_get_current_buf()
-  local ft      = vim.bo[cur_buf].filetype
-  local fname   = vim.api.nvim_buf_get_name(cur_buf)
+	local cur_win = vim.api.nvim_get_current_win()
+	local cur_buf = vim.api.nvim_get_current_buf()
+	local ft = vim.bo[cur_buf].filetype
+	local path = buf_path(cur_buf)
 
-  if fname == '' or vim.bo[cur_buf].buftype ~= '' or vim.fn.filereadable(fname) ~= 1 then
-    vim.notify('Nothing diffable here.', vim.log.levels.WARN)
-    return
-  end
+	if not is_readable(path) then
+		vim.notify("Nothing to diff (unsaved buffer).", vim.log.levels.WARN)
+		return
+	end
 
-  local scratch_name = 'last-look://' .. fname
-  local scratch_buf  = vim.fn.bufnr(scratch_name)
+	local scratch = "last-look://" .. path
+	local s_buf = vim.fn.bufnr(scratch)
+	if s_buf == -1 then
+		s_buf = vim.api.nvim_create_buf(false, true) -- listed=false, scratch=true
+		vim.api.nvim_buf_set_name(s_buf, scratch)
+		vim.bo[s_buf].buftype = "nofile"
+		vim.bo[s_buf].bufhidden = "wipe"
+		vim.bo[s_buf].swapfile = false
+		vim.bo[s_buf].filetype = ft
+	else
+		vim.bo[s_buf].modifiable = true
+		vim.api.nvim_buf_set_lines(s_buf, 0, -1, false, {})
+	end
 
-  -- create or reuse the scratch buffer
-  if scratch_buf == -1 then
-    scratch_buf = vim.api.nvim_create_buf(false, true) -- listed=false, scratch=true
-    vim.api.nvim_buf_set_name(scratch_buf, scratch_name)
-    vim.bo[scratch_buf].buftype   = 'nofile'
-    vim.bo[scratch_buf].bufhidden = 'wipe'
-    vim.bo[scratch_buf].swapfile  = false
-    vim.bo[scratch_buf].filetype  = ft
-  else
-    -- refresh contents if it exists
-    vim.bo[scratch_buf].modifiable = true
-    vim.api.nvim_buf_set_lines(scratch_buf, 0, -1, false, {})
-  end
+	local lines = vim.fn.readfile(path)
+	vim.api.nvim_buf_set_lines(s_buf, 0, -1, false, lines)
+	vim.bo[s_buf].modifiable = false
 
-  -- read file-on-disk into scratch (no :read, avoid extra blank line)
-  local lines = vim.fn.readfile(fname)
-  vim.api.nvim_buf_set_lines(scratch_buf, 0, -1, false, lines)
-  vim.bo[scratch_buf].modifiable = false
+	-- open/focus split showing scratch
+	local target_win
+	for _, w in ipairs(vim.api.nvim_list_wins()) do
+		if vim.api.nvim_win_get_buf(w) == s_buf then
+			target_win = w
+			break
+		end
+	end
+	if not target_win then
+		vim.cmd(cfg.diff_command)
+		target_win = vim.api.nvim_get_current_win()
+		vim.api.nvim_win_set_buf(target_win, s_buf)
+	end
 
-  -- open / focus a vertical split showing the scratch
-  local target_win
-  for _, w in ipairs(vim.api.nvim_list_wins()) do
-    if vim.api.nvim_win_get_buf(w) == scratch_buf then target_win = w break end
-  end
-  if not target_win then
-    vim.cmd('vert new')
-    target_win = vim.api.nvim_get_current_win()
-    vim.api.nvim_win_set_buf(target_win, scratch_buf)
-  end
-
-  -- diff both sides
-  vim.api.nvim_set_current_win(target_win)
-  vim.cmd('diffthis')
-  vim.api.nvim_set_current_win(cur_win)
-  vim.cmd('diffthis')
+	-- enter diff mode both sides
+	vim.api.nvim_set_current_win(target_win)
+	vim.cmd("diffthis")
+	vim.api.nvim_set_current_win(cur_win)
+	vim.cmd("diffthis")
 end
 
--- SmartQuit: skip in non-file buffers; if modified, prompt; otherwise plain :q
-local function smart_quit_current()
-  local b = vim.api.nvim_get_current_buf()
-  local name = vim.api.nvim_buf_get_name(b)
+-- single-buffer guard (handles saved + unsaved)
+local function last_look_current()
+	local b = vim.api.nvim_get_current_buf()
+	local name = buf_path(b)
 
-  -- if we're in the scratch or any non-file buffer, do a plain :q
-  if vim.bo[b].buftype ~= '' or name:find('^last%-look://') then
-    vim.cmd('q')
-    return
-  end
+	-- scratch/non-file buffers: plain :q
+	if not is_normal(b) or name:match("^last%-look://") then
+		vim.cmd("q")
+		return
+	end
 
-  if not vim.bo[b].modified or name == '' or vim.fn.filereadable(name) ~= 1 then
-    vim.cmd('q')
-    return
-  end
+	if not vim.bo[b].modified then
+		vim.cmd("q") -- clean; quit
+		return
+	end
 
-  local choices = table.concat({ cfg.labels.save, cfg.labels.discard, cfg.labels.diff, cfg.labels.cancel }, '\n')
-  local choice = cfg.use_confirm and vim.fn.confirm('Buffer has unsaved changes:', choices, 1) or 4
+	local has_disk = is_readable(name)
+	local labels = has_disk and cfg.labels_saved or cfg.labels_new
+	local prompt = has_disk and "Buffer has unsaved changes:" or "Unnamed buffer has unsaved changes:"
+	local choice
+	if cfg.use_confirm then
+		choice = vim.fn.confirm(prompt, table.concat(labels, "\n"), 1)
+	else
+		local map = has_disk and { s = 1, d = 2, f = 3, c = 4 } or { s = 1, d = 2, c = 3 }
+		local raw =
+			vim.fn.input(has_disk and "[s]ave, [d]iscard, [f]diff, [c]ancel: " or "[s]ave as, [d]iscard, [c]ancel: ")
+		choice = map[(raw or ""):lower()] or (has_disk and 4 or 3)
+	end
 
-  if choice == 1 then
-    vim.cmd('w | q')
-  elseif choice == 2 then
-    vim.cmd('q!')
-  elseif choice == 3 then
-    show_diff_with_disk()
-    vim.notify('Showing diff. Save (:w) or force quit (:q!).', vim.log.levels.WARN)
-  end
+	if has_disk then
+		if choice == 1 then
+			vim.cmd("w | q")
+		elseif choice == 2 then
+			vim.cmd("q!")
+		elseif choice == 3 then
+			show_diff_with_disk()
+		end
+	else
+		if choice == 1 then
+			vim.cmd("confirm saveas")
+			if not vim.bo[b].modified then
+				vim.cmd("q")
+			end
+		elseif choice == 2 then
+			vim.cmd("q!")
+		else
+			-- cancel
+		end
+	end
 end
 
--- LastLook: if modified, show diff and DO NOT quit; else, do a normal :q
-vim.api.nvim_create_user_command('LastLook', function()
-  local b = vim.api.nvim_get_current_buf()
-  local name = vim.api.nvim_buf_get_name(b)
-  if vim.bo[b].modified and name ~= '' and vim.fn.filereadable(name) == 1 then
-    show_diff_with_disk()
-    vim.notify('Unsaved changes — opening diff. Save (:w) or force quit (:q!).', vim.log.levels.WARN)
-    return  -- stay in nvim with the diff visible
-  end
-  vim.cmd('q')
-end, {})
+-- guard for :qa / :qall
+local function last_look_all()
+	local function next_dirty()
+		for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+			if is_normal(buf) and vim.bo[buf].modified then
+				return buf
+			end
+		end
+		return nil
+	end
 
--- LastLookAll: same as above, but for :qa
-vim.api.nvim_create_user_command('LastLookAll', function()
-  for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.api.nvim_buf_is_loaded(bufnr)
-       and vim.bo[bufnr].buftype == ''
-       and vim.bo[bufnr].modified
-       and vim.fn.filereadable(vim.api.nvim_buf_get_name(bufnr)) == 1 then
-      -- run your same guard / diff logic here
-      vim.api.nvim_set_current_buf(bufnr)
-      vim.cmd('LastLook') -- reuse your single-buffer command
-      return -- bail after first modified buffer so user can act
-    end
-  end
-  -- if no modified buffers left, safe to quit all
-  vim.cmd('qa')
-end, { desc = 'Run last-look guard across all buffers' })
+	local target = next_dirty()
+	if not target then
+		vim.cmd("qa") -- nothing dirty; quit all
+		return
+	end
 
+	vim.api.nvim_set_current_buf(target)
+	last_look_current() -- handle one; user can :qa again, or you can loop
+	-- If you want automatic iteration, uncomment below:
+	-- while true do
+	--   local b = next_dirty(); if not b then break end
+	--   vim.api.nvim_set_current_buf(b)
+	--   last_look_current()
+	-- end
+	-- if not next_dirty() then vim.cmd('qa') end
+end
 
-vim.keymap.set('c', '<CR>', function()
-  local t = vim.fn.getcmdtype()
-  local l = vim.fn.getcmdline()
-  if t == ':' and l:match('^%s*q%s*$') then
-    return '\x15LastLook\r'
-  elseif t == ':' and l:match('^%s*quit%s*$') then
-    return '\x15LastLook\r'
-  elseif t == ':' and l:match('^%s*qa%s*$') then
-    return '\x15LastLookAll\r'
-  elseif t == ':' and l:match('^%s*qall%s*$') then
-    return '\x15LastLookAll\r'
-  else
-    return '\r'
-  end
-end, { expr = true, noremap = true, desc = 'last-look: smart :q remap' })
+-- public commands
+local function define_commands()
+	vim.api.nvim_create_user_command("LastLook", last_look_current, { desc = "last-look: guard :q" })
+	vim.api.nvim_create_user_command("LastLookAll", last_look_all, { desc = "last-look: guard :qa" })
+	vim.api.nvim_create_user_command("DiffOrig", show_diff_with_disk, { desc = "last-look: open diff view" })
+end
 
+-- command-line <CR> mapping: catch bare q/quit/qa/qall (not the ! forms)
+local function define_cmdline_mapping()
+	-- nuke any legacy abbrevs you might have had
+	vim.cmd([[silent! cunabbrev q]])
+	vim.cmd([[silent! cunabbrev quit]])
+	vim.cmd([[silent! cunabbrev qa]])
+	vim.cmd([[silent! cunabbrev qall]])
 
--- Optional: keep a manual command too
-vim.api.nvim_create_user_command('DiffOrig', show_diff_with_disk, {})
+	vim.keymap.set("c", "<CR>", function()
+		local t = vim.fn.getcmdtype()
+		local l = vim.fn.getcmdline()
+		if t ~= ":" then
+			return "\r"
+		end
+		if l:match("^%s*q%s*$") then
+			return "\x15LastLook\r"
+		elseif l:match("^%s*quit%s*$") then
+			return "\x15LastLook\r"
+		elseif l:match("^%s*qa%s*$") then
+			return "\x15LastLookAll\r"
+		elseif l:match("^%s*qall%s*$") then
+			return "\x15LastLookAll\r"
+		else
+			return "\r"
+		end
+	end, { expr = true, noremap = true, desc = "last-look: smart :q/:qa remap" })
+end
+
+-- setup
+function M.setup(opts)
+	if opts then
+		for k, v in pairs(opts) do
+			cfg[k] = v
+		end
+	end
+	define_commands()
+	define_cmdline_mapping()
+end
+
+-- optional direct API exports
+M.diff_orig = show_diff_with_disk
+
 return M
-
