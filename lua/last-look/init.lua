@@ -2,10 +2,10 @@ local M = {}
 
 -- defaults
 local cfg = {
-	diff_command = "vert new", -- how to open the scratch view
-	use_confirm = true, -- use vim.fn.confirm vs raw input
-	labels_saved = { "&Save", "&Discard", "&Diff", "&Cancel" },
-	labels_new = { "&Save As", "&Discard", "&Cancel" },
+	diff_command = "vert new",
+	use_confirm = true,
+	labels_saved = { "&Write", "&Quit without writing", "&Diff", "&Cancel" },
+	labels_new = { "&Write As", "&Quit without writing", "&Cancel" },
 }
 
 -- utils
@@ -92,12 +92,17 @@ local function last_look_current()
 	local labels = has_disk and cfg.labels_saved or cfg.labels_new
 	local prompt = has_disk and "Buffer has unsaved changes:" or "Unnamed buffer has unsaved changes:"
 	local choice
+
 	if cfg.use_confirm then
+		-- confirm() will use the & markers
 		choice = vim.fn.confirm(prompt, table.concat(labels, "\n"), 1)
 	else
-		local map = has_disk and { s = 1, d = 2, f = 3, c = 4 } or { s = 1, d = 2, c = 3 }
-		local raw =
-			vim.fn.input(has_disk and "[s]ave, [d]iscard, [f]diff, [c]ancel: " or "[s]ave as, [d]iscard, [c]ancel: ")
+		-- plain input fallback
+		local map = has_disk and { w = 1, q = 2, d = 3, c = 4 } or { w = 1, q = 2, c = 3 }
+		local raw = vim.fn.input(
+			has_disk and "[w]rite, [q]uit without writing, [d]iff, [c]ancel: "
+				or "[w]rite as, [q]uit without writing, [c]ancel: "
+		)
 		choice = map[(raw or ""):lower()] or (has_disk and 4 or 3)
 	end
 
@@ -117,8 +122,6 @@ local function last_look_current()
 			end
 		elseif choice == 2 then
 			vim.cmd("q!")
-		else
-			-- cancel
 		end
 	end
 end
