@@ -4,7 +4,9 @@ local M = {}
 local cfg = {
 	diff_command = "vert new",
 	use_confirm = true,
-	labels_saved = { "&Write", "&Quit without writing", "&Diff", "&Cancel" },
+	-- saved files: Diff, Write, Quit w/o writing, Cancel
+	labels_saved = { "&Diff", "&Write", "&Quit without writing", "&Cancel" },
+	-- unnamed files (no Diff): Write As, Quit w/o writing, Cancel
 	labels_new = { "&Write As", "&Quit without writing", "&Cancel" },
 }
 
@@ -77,14 +79,12 @@ local function last_look_current()
 	local b = vim.api.nvim_get_current_buf()
 	local name = buf_path(b)
 
-	-- scratch/non-file buffers: plain :q
 	if not is_normal(b) or name:match("^last%-look://") then
 		vim.cmd("q")
 		return
 	end
-
 	if not vim.bo[b].modified then
-		vim.cmd("q") -- clean; quit
+		vim.cmd("q")
 		return
 	end
 
@@ -94,13 +94,13 @@ local function last_look_current()
 	local choice
 
 	if cfg.use_confirm then
-		-- confirm() will use the & markers
+		-- indexes now: 1=Diff, 2=Write, 3=Quit w/o writing, 4=Cancel
 		choice = vim.fn.confirm(prompt, table.concat(labels, "\n"), 1)
 	else
-		-- plain input fallback
-		local map = has_disk and { w = 1, q = 2, d = 3, c = 4 } or { w = 1, q = 2, c = 3 }
+		-- hotkeys: d=diff, w=write, q=quit-no-write, c=cancel
+		local map = has_disk and { d = 1, w = 2, q = 3, c = 4 } or { w = 1, q = 2, c = 3 }
 		local raw = vim.fn.input(
-			has_disk and "[w]rite, [q]uit without writing, [d]iff, [c]ancel: "
+			has_disk and "[d]iff, [w]rite, [q]uit without writing, [c]ancel: "
 				or "[w]rite as, [q]uit without writing, [c]ancel: "
 		)
 		choice = map[(raw or ""):lower()] or (has_disk and 4 or 3)
@@ -108,20 +108,25 @@ local function last_look_current()
 
 	if has_disk then
 		if choice == 1 then
-			vim.cmd("w | q")
-		elseif choice == 2 then
-			vim.cmd("q!")
-		elseif choice == 3 then
 			show_diff_with_disk()
+		elseif choice == 2 then
+			vim.cmd("wq") -- write then quit (your W path)
+		elseif choice == 3 then
+			vim.cmd("q!")
+		else
+			-- cancel
 		end
 	else
-		if choice == 1 then
+		if choice == 1 then -- "Write As"
 			vim.cmd("confirm saveas")
+			-- after saveas the buffer is named & saved; just close the window
 			if not vim.bo[b].modified then
 				vim.cmd("q")
 			end
-		elseif choice == 2 then
+		elseif choice == 2 then -- "Quit without writing"
 			vim.cmd("q!")
+		else
+			-- cancel
 		end
 	end
 end
